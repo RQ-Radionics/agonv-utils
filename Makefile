@@ -4,6 +4,7 @@
 #   make                      → compila todos los comandos (default: esp32p4)
 #   make TARGET=esp32s3       → compila para ESP32-S3 (Xtensa)
 #   make echo                 → compila solo echo.bin
+#   make install              → copia .bin a ../agon-lite-v/data/<TARGET>/
 #   make clean
 #
 # Prerequisito: toolchain instalado via ESP-IDF
@@ -11,14 +12,25 @@
 
 TARGET ?= esp32p4
 
-COMMANDS = echo grep head tail wc strings bootlogo
+COMMANDS  = echo grep head tail wc strings bootlogo
+DATA_DIR  = $(abspath ../agon-lite-v/data/$(TARGET))
 
-.PHONY: all clean $(COMMANDS)
+.PHONY: all clean install $(COMMANDS)
 
 all: $(COMMANDS)
 
 $(COMMANDS):
 	$(MAKE) -C $@ TARGET=$(TARGET)
+
+install: all
+	@mkdir -p $(DATA_DIR)
+	@for cmd in $(COMMANDS); do \
+	    bin=$$cmd/bin/$$cmd.bin; \
+	    if [ -f $$bin ]; then \
+	        cp $$bin $(DATA_DIR)/$$cmd.bin; \
+	        echo "  → $(DATA_DIR)/$$cmd.bin"; \
+	    fi; \
+	done
 
 clean:
 	for cmd in $(COMMANDS); do $(MAKE) -C $$cmd clean; done
