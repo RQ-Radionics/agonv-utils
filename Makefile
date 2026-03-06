@@ -11,7 +11,7 @@
 
 TARGET ?= esp32p4
 
-COMMANDS = echo grep head tail wc strings
+COMMANDS = echo grep head tail wc strings bootlogo
 
 .PHONY: all clean $(COMMANDS)
 
