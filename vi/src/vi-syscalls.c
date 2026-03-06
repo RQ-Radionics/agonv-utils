@@ -35,10 +35,10 @@ static int _alloc_fd(uint8_t fh)
 int _open(const char *path, int flags, int mode)
 {
     (void)mode;
-    /* flags: O_RDONLY=0, O_WRONLY=1, O_RDWR=2, O_CREAT|O_TRUNC=0x241 etc. */
+    /* flags: O_RDONLY=0, O_WRONLY=1, O_RDWR=2, O_CREAT=0x200, O_TRUNC=0x400 */
     const char *mosmode;
     if (flags == 0)         mosmode = "rb";
-    else if (flags & 0x200) mosmode = "wb";  /* O_CREAT */
+    else if (flags & 0x200) mosmode = "wb";  /* O_CREAT → write */
     else                    mosmode = "rb";
     uint8_t fh = g_mos->fopen(path, mosmode);
     if (!fh) return -1;
@@ -83,13 +83,25 @@ off_t _lseek(int fd, off_t offset, int whence)
 
 int _fstat(int fd, struct stat *st)
 {
-    (void)fd;
-    /* Return minimal stat — enough to satisfy newlib FILE buffering */
-    if (st) {
-        for (int i = 0; i < (int)sizeof(struct stat); i++)
-            ((char *)st)[i] = 0;
-        st->st_mode = 0100644;  /* regular file */
-        st->st_blksize = 512;
+    if (!st) return 0;
+    for (int i = 0; i < (int)sizeof(struct stat); i++)
+        ((char *)st)[i] = 0;
+    if (fd == 0 || fd == 1 || fd == 2) {
+        st->st_mode = 0020666;  /* character device (tty) */
+        return 0;
+    }
+    st->st_mode    = 0100644;   /* regular file */
+    st->st_blksize = 512;
+    if (fd >= 3 && fd < MAX_FD && _fd_to_fh[fd]) {
+        /* Determine file size: seek-to-end, tell, restore position.
+           newlib's fseek(SEEK_END) uses st_size from _fstat rather than
+           calling _lseek(SEEK_END) directly, so this must be correct. */
+        uint8_t fh  = _fd_to_fh[fd];
+        long cur    = g_mos->ftell(fh);
+        g_mos->flseek(fh, 0, 2);       /* SEEK_END */
+        long size   = g_mos->ftell(fh);
+        g_mos->flseek(fh, cur, 0);     /* SEEK_SET — restore */
+        st->st_size = (off_t)size;
     }
     return 0;
 }
@@ -130,12 +142,17 @@ int system(const char *command) { (void)command; return -1; }
 
 /* ── Newlib reentrancy support ────────────────────────────────────────── */
 /* Newlib's stdio uses a per-task reentrancy structure. We run single-
-   threaded on MOS, so provide a single global one. */
-static struct _reent _global_reent = _REENT_INIT(_global_reent);
+   threaded on MOS, so provide a single global one.
+   _impure_data / _impure_ptr are referenced directly by some newlib
+   internals (e.g. __srefill_r, __sinit) independently of __getreent().
+   We use _impure_data as the one true reent structure and point
+   everything at it. */
+struct _reent  _impure_data = _REENT_INIT(_impure_data);
+struct _reent *_impure_ptr  = &_impure_data;
 
 struct _reent *__getreent(void)
 {
-    return &_global_reent;
+    return &_impure_data;
 }
 
 /* ── Process stubs (needed by abort/raise via newlib) ─────────────────── */
