@@ -99,69 +99,24 @@ int _isatty(int fd)
     return (fd == 0 || fd == 1 || fd == 2) ? 1 : 0;
 }
 
-/* _sbrk: heap for newlib malloc.
-   MOS has its own malloc, but newlib also uses _sbrk internally
-   for its own allocator. We provide a small static heap for newlib's
-   internal needs (FILE buffers, etc.). vi.c uses malloc() from newlib
-   which we redirect to MOS below. */
-static char _heap[4096];
-static char *_heap_ptr = _heap;
+/* _sbrk: provide newlib's allocator with a large heap from PSRAM.
+   We allocate a single block from MOS at startup (_start sets _heap/_heap_end)
+   and hand it out incrementally. This keeps a single consistent allocator —
+   newlib's own malloc/free/realloc — so there are no pointer-provenance
+   mismatches when newlib internally frees its own FILE buffers etc. */
+#define HEAP_SIZE (256 * 1024)   /* 256 KB from PSRAM for vi's heap */
+
+static char *_heap_base = (void *)0;
+static char *_heap_ptr  = (void *)0;
+static char *_heap_end  = (void *)0;
 
 void *_sbrk(int incr)
 {
+    if (!_heap_base) return (void *)-1;   /* not yet initialised */
     char *prev = _heap_ptr;
-    if (_heap_ptr + incr > _heap + sizeof(_heap)) return (void *)-1;
+    if (_heap_ptr + incr > _heap_end) return (void *)-1;
     _heap_ptr += incr;
     return prev;
-}
-
-/* ── Override malloc/free/realloc to use MOS directly ────────────────── */
-/* Newlib defines malloc/free/realloc in terms of _sbrk. We override them
-   here to use MOS's allocator instead, which has access to PSRAM. */
-
-/* MOS malloc doesn't record size. Use a 4-byte header for realloc support. */
-void *malloc(size_t size)
-{
-    uint8_t *raw = (uint8_t *)g_mos->malloc(size + 4);
-    if (!raw) return (void *)0;
-    raw[0] = (uint8_t)(size & 0xFF);
-    raw[1] = (uint8_t)((size >> 8) & 0xFF);
-    raw[2] = (uint8_t)((size >> 16) & 0xFF);
-    raw[3] = (uint8_t)((size >> 24) & 0xFF);
-    return raw + 4;
-}
-
-void free(void *ptr)
-{
-    if (!ptr) return;
-    g_mos->free((uint8_t *)ptr - 4);
-}
-
-void *calloc(size_t n, size_t sz)
-{
-    size_t total = n * sz;
-    void *p = malloc(total);
-    if (p) { char *c = (char *)p; for (size_t i = 0; i < total; i++) c[i] = 0; }
-    return p;
-}
-
-void *realloc(void *ptr, size_t size)
-{
-    if (!ptr) return malloc(size);
-    uint8_t *raw = (uint8_t *)ptr - 4;
-    size_t old = (size_t)raw[0] | ((size_t)raw[1]<<8) |
-                 ((size_t)raw[2]<<16) | ((size_t)raw[3]<<24);
-    uint8_t *nraw = (uint8_t *)g_mos->malloc(size + 4);
-    if (!nraw) return (void *)0;
-    nraw[0] = (uint8_t)(size & 0xFF);
-    nraw[1] = (uint8_t)((size >> 8) & 0xFF);
-    nraw[2] = (uint8_t)((size >> 16) & 0xFF);
-    nraw[3] = (uint8_t)((size >> 24) & 0xFF);
-    size_t copy = old < size ? old : size;
-    uint8_t *src = (uint8_t *)ptr, *dst = nraw + 4;
-    for (size_t i = 0; i < copy; i++) dst[i] = src[i];
-    g_mos->free(raw);
-    return dst;
 }
 
 /* ── errno (needed by newlib) ─────────────────────────────────────────── */
@@ -195,10 +150,26 @@ extern int vi_main(int argc, char **argv);
 void _start(int argc, char **argv, t_mos_api *mos)
 {
     g_mos = mos;
+
+    /* Allocate heap from PSRAM via MOS, then wire it to _sbrk.
+       This gives newlib's malloc/free/realloc a large coherent heap so
+       that newlib-internal frees (FILE buffers, atexit, etc.) are always
+       handled by the same allocator that allocated them. */
+    _heap_base = (char *)mos->malloc(HEAP_SIZE);
+    if (_heap_base) {
+        _heap_ptr = _heap_base;
+        _heap_end = _heap_base + HEAP_SIZE;
+    }
+
     /* Force stdout unbuffered: vi uses fwrite(stdout) for every character
        drawn on screen. Without this newlib buffers output until the buffer
        fills (4096 bytes), making the screen appear blank during editing. */
     setvbuf(stdout, NULL, _IONBF, 0);
+
     int rc = vi_main(argc, argv);
+
+    /* Return heap to MOS before exit */
+    if (_heap_base) mos->free(_heap_base);
+
     mos->exit(rc);
 }
