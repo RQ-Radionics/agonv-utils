@@ -70,9 +70,16 @@ int    strcmp(const char *a, const char *b);
 int    strncmp(const char *a, const char *b, size_t n);
 char  *strcpy(char *dst, const char *src);
 char  *strncpy(char *dst, const char *src, size_t n);
+char  *strcat(char *dst, const char *src);
+char  *strdup(const char *s);
 char  *strstr(const char *hay, const char *needle);
 int    tolower(int c);
+int    toupper(int c);
 int    isprint(int c);
+
+/* Algoritmos */
+void qsort(void *base, size_t n, size_t sz,
+           int (*cmp)(const void *, const void *));
 
 /* fseek whence */
 #define SEEK_SET 0
@@ -157,6 +164,73 @@ int tolower(int c)
 int isprint(int c)
 {
     return (c >= 32 && c < 127);
+}
+
+int toupper(int c)
+{
+    if (c >= 'a' && c <= 'z') return c - ('a' - 'A');
+    return c;
+}
+
+char *strcat(char *dst, const char *src)
+{
+    char *d = dst;
+    while (*d) d++;
+    while ((*d++ = *src++));
+    return dst;
+}
+
+char *strdup(const char *s)
+{
+    size_t n = strlen(s) + 1;
+    char *p = (char *)_mos->malloc(n);
+    if (p) strcpy(p, s);
+    return p;
+}
+
+/* qsort — implementación heapsort iterativa, O(n log n), sin recursión extra */
+static void _qsort_swap(char *a, char *b, size_t sz)
+{
+    char tmp;
+    while (sz--) { tmp = *a; *a++ = *b; *b++ = tmp; }
+}
+
+void qsort(void *base, size_t n, size_t sz,
+           int (*cmp)(const void *, const void *))
+{
+    char *b = (char *)base;
+    size_t i, j, root, child;
+
+    if (n < 2) return;
+
+    /* Build max-heap */
+    for (i = n/2; i-- > 0; ) {
+        root = i;
+        for (;;) {
+            child = 2*root + 1;
+            if (child >= n) break;
+            if (child+1 < n && cmp(b+child*sz, b+(child+1)*sz) < 0)
+                child++;
+            if (cmp(b+root*sz, b+child*sz) >= 0) break;
+            _qsort_swap(b+root*sz, b+child*sz, sz);
+            root = child;
+        }
+    }
+
+    /* Sort */
+    for (j = n-1; j > 0; j--) {
+        _qsort_swap(b, b+j*sz, sz);
+        root = 0;
+        for (;;) {
+            child = 2*root + 1;
+            if (child >= j) break;
+            if (child+1 < j && cmp(b+child*sz, b+(child+1)*sz) < 0)
+                child++;
+            if (cmp(b+root*sz, b+child*sz) >= 0) break;
+            _qsort_swap(b+root*sz, b+child*sz, sz);
+            root = child;
+        }
+    }
 }
 
 int atoi(const char *s)
