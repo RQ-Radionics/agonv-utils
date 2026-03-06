@@ -13,6 +13,7 @@
 #include <sys/types.h>  /* off_t */
 #include <stdint.h>
 #include <reent.h>      /* struct _reent, __getreent */
+#include <stdio.h>      /* setvbuf, _IONBF */
 
 /* Global MOS API pointer — set by _start() */
 t_mos_api *g_mos;
@@ -194,6 +195,10 @@ extern int vi_main(int argc, char **argv);
 void _start(int argc, char **argv, t_mos_api *mos)
 {
     g_mos = mos;
+    /* Force stdout unbuffered: vi uses fwrite(stdout) for every character
+       drawn on screen. Without this newlib buffers output until the buffer
+       fills (4096 bytes), making the screen appear blank during editing. */
+    setvbuf(stdout, NULL, _IONBF, 0);
     int rc = vi_main(argc, argv);
     mos->exit(rc);
 }
