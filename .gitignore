@@ -1,0 +1,10 @@
+# Binarios compilados
+*/bin/*.elf
+*/bin/*.map
+*/bin/*.asm
+
+# Objetos del SDK
+sdk/*.o
+
+# macOS
+.DS_Store
