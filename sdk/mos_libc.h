@@ -73,6 +73,8 @@ char  *strncpy(char *dst, const char *src, size_t n);
 char  *strcat(char *dst, const char *src);
 char  *strdup(const char *s);
 char  *strstr(const char *hay, const char *needle);
+char  *strrchr(const char *s, int c);
+int    memcmp(const void *a, const void *b, size_t n);
 int    tolower(int c);
 int    toupper(int c);
 int    isprint(int c);
@@ -186,6 +188,27 @@ char *strdup(const char *s)
     char *p = (char *)_mos->malloc(n);
     if (p) strcpy(p, s);
     return p;
+}
+
+char *strrchr(const char *s, int c)
+{
+    const char *last = NULL;
+    for (; *s; s++) {
+        if (*s == (char)c) last = s;
+    }
+    if (c == '\0') return (char *)s;
+    return (char *)last;
+}
+
+int memcmp(const void *a, const void *b, size_t n)
+{
+    const unsigned char *pa = (const unsigned char *)a;
+    const unsigned char *pb = (const unsigned char *)b;
+    while (n--) {
+        if (*pa != *pb) return (int)*pa - (int)*pb;
+        pa++; pb++;
+    }
+    return 0;
 }
 
 /* qsort — implementación heapsort iterativa, O(n log n), sin recursión extra */
