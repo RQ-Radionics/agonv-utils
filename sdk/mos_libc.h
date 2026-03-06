@@ -19,6 +19,7 @@
 #define MOS_LIBC_H
 
 #include "mos_api_table.h"
+#include <stdarg.h>
 
 /* ── Tipos libc mínimos ───────────────────────────────────────────────── */
 typedef unsigned char  uint8_t;
@@ -74,10 +75,34 @@ char  *strcat(char *dst, const char *src);
 char  *strdup(const char *s);
 char  *strstr(const char *hay, const char *needle);
 char  *strrchr(const char *s, int c);
+char  *strchrnul(const char *s, int c);
+char  *strndup(const char *s, size_t n);
 int    memcmp(const void *a, const void *b, size_t n);
+long   strtol(const char *s, char **endp, int base);
 int    tolower(int c);
 int    toupper(int c);
 int    isprint(int c);
+int    isdigit(int c);
+int    isalpha(int c);
+int    isalnum(int c);
+int    isspace(int c);
+int    isupper(int c);
+int    islower(int c);
+int    ispunct(int c);
+
+/* Printf con destino a buffer */
+int vsnprintf(char *buf, size_t sz, const char *fmt, va_list ap);
+int  snprintf(char *buf, size_t sz, const char *fmt, ...);
+
+/* Memoria */
+void *realloc(void *ptr, size_t size);
+
+/* Consola extra */
+int putchar(int c);
+
+/* errno / strerror (stubs — MOS no expone errno) */
+extern int errno;
+char *strerror(int e);
 
 /* Algoritmos */
 void qsort(void *base, size_t n, size_t sz,
@@ -190,6 +215,15 @@ char *strdup(const char *s)
     return p;
 }
 
+char *strndup(const char *s, size_t n)
+{
+    size_t len = 0;
+    while (len < n && s[len]) len++;
+    char *p = (char *)_mos->malloc(len + 1);
+    if (p) { for (size_t i = 0; i < len; i++) p[i] = s[i]; p[len] = '\0'; }
+    return p;
+}
+
 char *strrchr(const char *s, int c)
 {
     const char *last = NULL;
@@ -198,6 +232,12 @@ char *strrchr(const char *s, int c)
     }
     if (c == '\0') return (char *)s;
     return (char *)last;
+}
+
+char *strchrnul(const char *s, int c)
+{
+    for (; *s && *s != (char)c; s++);
+    return (char *)s;
 }
 
 int memcmp(const void *a, const void *b, size_t n)
@@ -210,6 +250,37 @@ int memcmp(const void *a, const void *b, size_t n)
     }
     return 0;
 }
+
+long strtol(const char *s, char **endp, int base)
+{
+    long val = 0; int sign = 1;
+    while (*s == ' ' || *s == '\t') s++;
+    if (*s == '-') { sign = -1; s++; } else if (*s == '+') s++;
+    if (base == 0) {
+        if (*s == '0' && (s[1] == 'x' || s[1] == 'X')) { base = 16; s += 2; }
+        else if (*s == '0') { base = 8; s++; }
+        else base = 10;
+    } else if (base == 16 && *s == '0' && (s[1] == 'x' || s[1] == 'X')) s += 2;
+    for (;;) {
+        int d;
+        if (*s >= '0' && *s <= '9') d = *s - '0';
+        else if (*s >= 'a' && *s <= 'f') d = *s - 'a' + 10;
+        else if (*s >= 'A' && *s <= 'F') d = *s - 'A' + 10;
+        else break;
+        if (d >= base) break;
+        val = val * base + d; s++;
+    }
+    if (endp) *endp = (char *)s;
+    return sign * val;
+}
+
+int isdigit(int c) { return (c >= '0' && c <= '9'); }
+int isalpha(int c) { return ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')); }
+int isalnum(int c) { return isdigit(c) || isalpha(c); }
+int isspace(int c) { return (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'); }
+int isupper(int c) { return (c >= 'A' && c <= 'Z'); }
+int islower(int c) { return (c >= 'a' && c <= 'z'); }
+int ispunct(int c) { return (c > 32 && c < 127 && !isalnum(c)); }
 
 /* qsort — implementación heapsort iterativa, O(n log n), sin recursión extra */
 static void _qsort_swap(char *a, char *b, size_t sz)
@@ -289,90 +360,149 @@ static int _uxtoa(unsigned int v, char *buf, int upper)
     return len;
 }
 
-static void _out_str(const char *s, int to_stderr)
+/* ── Motor de formato genérico (sink configurable) ───────────────────── */
+
+/* Sink: destino de salida. buf==NULL → consola; buf!=NULL → buffer acotado */
+typedef struct {
+    char   *buf;   /* NULL = consola */
+    size_t  cap;   /* capacidad disponible (incluyendo NUL) */
+    size_t  pos;   /* bytes escritos (sin contar NUL) */
+} _FmtSink;
+
+static void _sink_ch(_FmtSink *s, char c)
 {
-    (void)to_stderr;  /* consola única en MOS */
-    _mos->puts(s);
+    if (s->buf) {
+        if (s->pos + 1 < s->cap) s->buf[s->pos] = c;
+    } else {
+        _mos->putch((uint8_t)c);
+    }
+    s->pos++;
 }
 
-static void _out_ch(char c)
+static void _sink_str(_FmtSink *s, const char *p)
 {
-    _mos->putch((uint8_t)c);
+    if (s->buf) {
+        while (*p) { _sink_ch(s, *p++); }
+    } else {
+        /* Consola: putch carácter a carácter (puts añade \r\n) */
+        while (*p) _mos->putch((uint8_t)*p++);
+    }
 }
 
-static int _vprintf_impl(const char *fmt, va_list ap)
+/* Formatear con ancho mínimo w y relleno pad_ch */
+static void _sink_pad(_FmtSink *s, const char *str, int slen, int width, int left, char pad_ch)
 {
-    int count = 0;
-    char buf[24];
-    int len;
+    int pad = width - slen;
+    if (!left) for (int i = 0; i < pad; i++) _sink_ch(s, pad_ch);
+    for (int i = 0; i < slen; i++) _sink_ch(s, str[i]);
+    if (left)  for (int i = 0; i < pad; i++) _sink_ch(s, ' ');
+}
 
+static int _vfmt(_FmtSink *s, const char *fmt, va_list ap)
+{
+    char tmp[32];
     for (; *fmt; fmt++) {
-        if (*fmt != '%') {
-            _out_ch(*fmt);
-            count++;
-            continue;
-        }
+        if (*fmt != '%') { _sink_ch(s, *fmt); continue; }
         fmt++;
-        /* flags mínimos: %-s, %0Nd no implementados, suficiente para utils */
+
+        /* Flags */
+        int left = 0, zero = 0;
+        while (*fmt == '-' || *fmt == '0') {
+            if (*fmt == '-') left = 1;
+            if (*fmt == '0') zero = 1;
+            fmt++;
+        }
+        char pad_ch = (zero && !left) ? '0' : ' ';
+
+        /* Ancho */
+        int width = 0;
+        while (*fmt >= '0' && *fmt <= '9') width = width * 10 + (*fmt++ - '0');
+
+        /* Precisión */
+        int prec = -1;
+        if (*fmt == '.') {
+            fmt++; prec = 0;
+            while (*fmt >= '0' && *fmt <= '9') prec = prec * 10 + (*fmt++ - '0');
+        }
+
+        /* Modificador de longitud */
+        int lng = 0;
+        if (*fmt == 'l') { lng = 1; fmt++; }
+        if (*fmt == 'l') { fmt++; } /* ll → tratar como l */
+
         switch (*fmt) {
         case 'd': case 'i': {
-            int v = va_arg(ap, int);
-            if (v < 0) { _out_ch('-'); count++; v = -v; }
-            len = _uitoa((unsigned int)v, buf);
-            buf[len] = '\0';
-            _out_str(buf, 0);
-            count += len;
+            long v = lng ? va_arg(ap, long) : (long)va_arg(ap, int);
+            int neg = (v < 0);
+            if (neg) v = -v;
+            int n = _uitoa((unsigned int)v, tmp); tmp[n] = '\0';
+            int slen = n + neg;
+            int pad = width - slen; if (pad < 0) pad = 0;
+            if (!left && pad_ch == '0') { if (neg) _sink_ch(s, '-'); for (int i=0;i<pad;i++) _sink_ch(s,'0'); }
+            else if (!left) { for (int i=0;i<pad;i++) _sink_ch(s,' '); if (neg) _sink_ch(s,'-'); }
+            else { if (neg) _sink_ch(s,'-'); }
+            _sink_str(s, tmp);
+            if (left) for (int i=0;i<pad;i++) _sink_ch(s,' ');
             break;
         }
         case 'u': {
-            unsigned int v = va_arg(ap, unsigned int);
-            len = _uitoa(v, buf);
-            buf[len] = '\0';
-            _out_str(buf, 0);
-            count += len;
+            unsigned long v = lng ? va_arg(ap, unsigned long) : (unsigned long)va_arg(ap, unsigned int);
+            int n = _uitoa((unsigned int)v, tmp); tmp[n] = '\0';
+            _sink_pad(s, tmp, n, width, left, pad_ch);
             break;
         }
-        case 'x': {
-            unsigned int v = va_arg(ap, unsigned int);
-            len = _uxtoa(v, buf, 0);
-            buf[len] = '\0';
-            _out_str(buf, 0);
-            count += len;
-            break;
-        }
-        case 'X': {
-            unsigned int v = va_arg(ap, unsigned int);
-            len = _uxtoa(v, buf, 1);
-            buf[len] = '\0';
-            _out_str(buf, 0);
-            count += len;
+        case 'x': case 'X': {
+            unsigned long v = lng ? va_arg(ap, unsigned long) : (unsigned long)va_arg(ap, unsigned int);
+            int n = _uxtoa((unsigned int)v, tmp, (*fmt=='X')); tmp[n] = '\0';
+            _sink_pad(s, tmp, n, width, left, pad_ch);
             break;
         }
         case 's': {
-            const char *s = va_arg(ap, const char *);
-            if (!s) s = "(null)";
-            _out_str(s, 0);
-            count += (int)strlen(s);
+            const char *p = va_arg(ap, const char *);
+            if (!p) p = "(null)";
+            int n = (int)strlen(p);
+            if (prec >= 0 && n > prec) n = prec;
+            _sink_pad(s, p, n, width, left, ' ');
             break;
         }
         case 'c': {
             char c = (char)va_arg(ap, int);
-            _out_ch(c);
-            count++;
+            tmp[0] = c;
+            _sink_pad(s, tmp, 1, width, left, ' ');
+            break;
+        }
+        case 'p': {
+            unsigned int v = (unsigned int)(unsigned long)va_arg(ap, void *);
+            _sink_str(s, "0x");
+            int n = _uxtoa(v, tmp, 0); tmp[n] = '\0';
+            _sink_str(s, tmp);
             break;
         }
         case '%':
-            _out_ch('%');
-            count++;
+            _sink_ch(s, '%');
             break;
         default:
-            _out_ch('%');
-            _out_ch(*fmt);
-            count += 2;
+            _sink_ch(s, '%');
+            if (lng) _sink_ch(s, 'l');
+            _sink_ch(s, *fmt);
             break;
         }
     }
-    return count;
+    if (s->buf) {
+        /* NUL-terminado */
+        if (s->cap > 0) {
+            size_t end = s->pos < s->cap ? s->pos : s->cap - 1;
+            s->buf[end] = '\0';
+        }
+    }
+    return (int)s->pos;
+}
+
+/* Wrappers de consola (usados por printf/fprintf) */
+static int _vprintf_impl(const char *fmt, va_list ap)
+{
+    _FmtSink s = { NULL, 0, 0 };
+    return _vfmt(&s, fmt, ap);
 }
 
 int printf(const char *fmt, ...)
@@ -505,28 +635,100 @@ int fseek(FILE *f, long offset, int whence)
     return _mos->flseek(f->fh, offset, whence);
 }
 
-/* ── Memoria ──────────────────────────────────────────────────────────── */
+/* ── vsnprintf / snprintf ─────────────────────────────────────────────── */
+
+int vsnprintf(char *buf, size_t sz, const char *fmt, va_list ap)
+{
+    _FmtSink s = { buf, sz, 0 };
+    return _vfmt(&s, fmt, ap);
+}
+
+int snprintf(char *buf, size_t sz, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    int r = vsnprintf(buf, sz, fmt, ap);
+    va_end(ap);
+    return r;
+}
+
+/* ── realloc ──────────────────────────────────────────────────────────── */
+
+/* MOS no tiene realloc. Para soportarlo correctamente necesitamos saber
+   el tamaño del bloque anterior. Instrumentamos malloc/free/realloc con
+   un header de 4 bytes delante del bloque usuario.
+   IMPORTANTE: esto hace que malloc() retorne ptr+4; free() ajusta ptr-4.
+   Todos los comandos que usan MOS_LIBC_IMPL se benefician de esto. */
+
+#define _RHEADER 4   /* sizeof(size_t) redondeado a 4 para alineación */
 
 void *malloc(size_t size)
 {
-    return _mos->malloc(size);
+    unsigned char *raw = (unsigned char *)_mos->malloc(size + _RHEADER);
+    if (!raw) return NULL;
+    /* Guardar tamaño en los primeros 4 bytes */
+    raw[0] = (unsigned char)(size & 0xFF);
+    raw[1] = (unsigned char)((size >> 8) & 0xFF);
+    raw[2] = (unsigned char)((size >> 16) & 0xFF);
+    raw[3] = (unsigned char)((size >> 24) & 0xFF);
+    return raw + _RHEADER;
 }
 
 void free(void *ptr)
 {
-    _mos->free(ptr);
+    if (!ptr) return;
+    _mos->free((unsigned char *)ptr - _RHEADER);
 }
 
 void *calloc(size_t n, size_t sz)
 {
     size_t total = n * sz;
-    void *p = _mos->malloc(total);
-    if (p) {
-        char *c = (char *)p;
-        for (size_t i = 0; i < total; i++) c[i] = 0;
-    }
+    void *p = malloc(total);
+    if (p) { char *c = (char *)p; for (size_t i = 0; i < total; i++) c[i] = 0; }
     return p;
 }
+
+void *realloc(void *ptr, size_t size)
+{
+    if (!ptr) return malloc(size);
+    unsigned char *raw = (unsigned char *)ptr - _RHEADER;
+    size_t old_size = (size_t)raw[0] | ((size_t)raw[1]<<8) |
+                      ((size_t)raw[2]<<16) | ((size_t)raw[3]<<24);
+    unsigned char *nraw = (unsigned char *)_mos->malloc(size + _RHEADER);
+    if (!nraw) return NULL;
+    nraw[0] = (unsigned char)(size & 0xFF);
+    nraw[1] = (unsigned char)((size >> 8) & 0xFF);
+    nraw[2] = (unsigned char)((size >> 16) & 0xFF);
+    nraw[3] = (unsigned char)((size >> 24) & 0xFF);
+    size_t copy = old_size < size ? old_size : size;
+    unsigned char *src = (unsigned char *)ptr;
+    unsigned char *dst = nraw + _RHEADER;
+    for (size_t i = 0; i < copy; i++) dst[i] = src[i];
+    _mos->free(raw);
+    return dst;
+}
+
+/* ── putchar ──────────────────────────────────────────────────────────── */
+
+int putchar(int c)
+{
+    _mos->putch((uint8_t)c);
+    return c;
+}
+
+/* ── errno / strerror (stubs) ─────────────────────────────────────────── */
+
+int errno = 0;
+
+char *strerror(int e)
+{
+    (void)e;
+    return "error";
+}
+
+/* ── fflush_all (stub — MOS no tiene buffering de I/O) ───────────────── */
+
+static inline void fflush_all(void) { /* nop */ }
 
 #endif /* MOS_LIBC_IMPL */
 #endif /* MOS_LIBC_H */
