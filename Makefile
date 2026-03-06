@@ -13,7 +13,7 @@
 TARGET ?= esp32p4
 
 COMMANDS  = echo grep head tail wc strings bootlogo
-DATA_DIR  = $(abspath ../agon-lite-v/data/$(TARGET))
+DATA_DIR  = $(abspath ../agon-lite-v/data/$(TARGET)/bin)
 
 .PHONY: all clean install $(COMMANDS)
 
