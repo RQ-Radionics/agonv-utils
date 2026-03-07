@@ -12,7 +12,7 @@
 
 TARGET ?= esp32p4
 
-COMMANDS  = echo grep head tail wc strings bootlogo cal concat sort ne bas2bbc bbc2bas vi
+COMMANDS  = echo grep head tail wc strings bootlogo cal concat sort ne bas2bbc bbc2bas vi i2c_scan
 DATA_DIR  = $(abspath ../agon-lite-v/data/$(TARGET)/bin)
 
 .PHONY: all clean install $(COMMANDS)
