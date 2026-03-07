@@ -16,8 +16,16 @@ void EDT_LoadFile(unsigned char *filename)
 
     fp = fopen((char *)filename, "rb");
     if (fp != NULL) {
-        len = (int)fread(EDT.gap_start, 1,
-                         (size_t)(EDT.gap_end - EDT.gap_start), fp);
+        /* Determine file size via seek-to-end/tell/seek-back.
+           Reading with an oversized count can confuse MOS fread;
+           using the exact size avoids that. */
+        fseek(fp, 0, SEEK_END);
+        long fsize = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        if (fsize <= 0) fsize = 0;
+        size_t maxread = (size_t)(EDT.gap_end - EDT.gap_start);
+        if ((size_t)fsize < maxread) maxread = (size_t)fsize;
+        len = (int)fread(EDT.gap_start, 1, maxread, fp);
         if (len > 0) {
             p = EDT.gap_start + len;
             if (*(p - 1) != '\n') {
