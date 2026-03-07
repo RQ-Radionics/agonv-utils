@@ -260,16 +260,25 @@ void EDT_ShowCursor(void)
 
 void EDT_ShowBottom(void)
 {
+    /* Format into a fixed buffer, then output exactly SCR_COLS-1 chars.
+       Never write to the last column on the last row — that would cause
+       the VDP to auto-wrap and scroll the screen. */
+    char buf[256];
+    int  maxcols = (int)SCR_COLS - 1;
+    if (maxcols <= 0) return;
+    snprintf(buf, sizeof(buf),
+             "Line %d/%d, %d/%d bytes -- ESC to exit, ^G for help %c Cut %d",
+             EDT.lineno,
+             EDT.total_lines,
+             (int)(EDT.gap_start - EDT.text_start + EDT.text_end - EDT.gap_end),
+             (int)(EDT.text_end - EDT.text_start),
+             EDT.is_changed ? '*' : ' ',
+             EDT.cut_lines);
     EDT_SetCursor(0, EDT.scr_rows - 1);
     EDT_InvVideo();
-    printf("Line %d/%d, %d/%d bytes -- ESC to exit, ^G for help %c Cut %d",
-           EDT.lineno,
-           EDT.total_lines,
-           (int)(EDT.gap_start - EDT.text_start + EDT.text_end - EDT.gap_end),
-           (int)(EDT.text_end - EDT.text_start),
-           EDT.is_changed ? '*' : ' ',
-           EDT.cut_lines);
-    EDT_ClrEOL();
+    int i;
+    for (i = 0; i < maxcols && buf[i]; i++) putch((unsigned char)buf[i]);
+    for (     ; i < maxcols;           i++) putch(' ');
     EDT_TrueVideo();
 }
 
