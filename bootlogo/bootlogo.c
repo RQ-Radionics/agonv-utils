@@ -12,6 +12,7 @@
  * Usage (from the MOS shell):
  *   RUN A:/bootlogo.bin         → Agon Light 2 logo
  *   RUN A:/bootlogo.bin 8       → Console 8 logo
+ *   RUN A:/bootlogo.bin r       → RISC-V logo
  *
  * Build:
  *   cd /Volumes/FastDisk/Queru/Ports/bootlogo
@@ -77,7 +78,156 @@ static void print_u32(uint32_t n)
 
 /* ── Datos de logo — idénticos al original ───────────────────────────────── */
 
-/* Agon Light 2 warrior icon (caracteres 200–238, 10 bytes c/u) */
+/* ── RISC-V logo icon (chars 200–247 + 248, 6x8 cell grid = 48x64 px) ────
+ *
+ * Canvas layout (48 wide × 64 tall, divided into 8×8 cells):
+ *
+ *   Col→  0        1        2        3        4        5
+ *        [200]    [201]    [202]    [203]    [204]    [205]   row 0 (y  0- 7)
+ *        [206]    [207]    [208]    [209]    [210]    [211]   row 1 (y  8-15)
+ *        [212]    [213]    [214]    [215]    [216]    [217]   row 2 (y 16-23)
+ *        [218]    [219]    [220]    [221]    [222]    [223]   row 3 (y 24-31)
+ *        [224]    [225]    [226]    [227]    [228]    [229]   row 4 (y 32-39)
+ *        [230]    [231]    [232]    [233]    [234]    [235]   row 5 (y 40-47)
+ *        [236]    [237]    [238]    [239]    [240]    [241]   row 6 (y 48-55)
+ *        [242]    [243]    [244]    [245]    [246]    [247]   row 7 (y 56-63)
+ *
+ * Pixel legend: W=white (R letter), G=gold (chevron), .=blue bg
+ * Based on the official RISC-V logo: R letter left, gold shield/chevron right,
+ * blue negative-space V inside the chevron.
+ *
+ * Char 248 = solid block (used by colour_bar, avoids collision with r6c2=238)
+ *
+ * Color indices:
+ *   bg  = 1  (dark blue)
+ *   fg W= 15 (white)
+ *   fg G= 14 (bright yellow/gold, ≥16 colours) or 6 (brown, <16 colours)
+ */
+static const uint8_t riscv_logo_chars[] = {
+    /* Row 0 */
+    23,200, 0x00,0x7F,0x7F,0x7F,0x7F,0x7F,0x7C,0x7C, /* r0c0 fg=white */
+    23,201, 0x00,0xFF,0xFF,0xFF,0xFF,0xFF,0x07,0x07, /* r0c1 fg=white */
+    23,202, 0x3F,0x3F,0x3F,0x3F,0x3F,0x3C,0x3C,0x3C, /* r0c2 fg=gold  */
+    23,203, 0xFF,0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00, /* r0c3 fg=gold  */
+    23,204, 0xFF,0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00, /* r0c4 fg=gold  */
+    23,205, 0xFF,0xFF,0xFF,0xFF,0xFF,0x0F,0x0F,0x0F, /* r0c5 fg=gold  */
+    /* Row 1 */
+    23,206, 0x7C,0x7C,0x7C,0x7C,0x7C,0x7C,0x7C,0x7C, /* r1c0 fg=white */
+    23,207, 0x07,0x07,0x07,0x07,0x07,0x07,0x07,0x07, /* r1c1 fg=white */
+    23,208, 0x3C,0x3C,0x3C,0x3C,0x3C,0x3C,0x3C,0x3C, /* r1c2 fg=gold  */
+    23,209, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, /* r1c3 fg=blue  */
+    23,210, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, /* r1c4 fg=blue  */
+    23,211, 0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F, /* r1c5 fg=gold  */
+    /* Row 2 */
+    23,212, 0x7C,0x7C,0x7C,0x7C,0x7F,0x7F,0x7F,0x7F, /* r2c0 fg=white */
+    23,213, 0x07,0x07,0x07,0x07,0xFF,0xFF,0xFF,0xFF, /* r2c1 fg=white */
+    23,214, 0x3C,0x3C,0x3C,0x3C,0x3C,0x3C,0x3C,0x1E, /* r2c2 fg=gold  */
+    23,215, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, /* r2c3 fg=blue  */
+    23,216, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, /* r2c4 fg=blue  */
+    23,217, 0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x1E, /* r2c5 fg=gold  */
+    /* Row 3 */
+    23,218, 0x7F,0x7C,0x7C,0x7C,0x7C,0x7C,0x7C,0x7C, /* r3c0 fg=white */
+    23,219, 0xFF,0xF8,0x7C,0x3E,0x1F,0x0F,0x07,0x03, /* r3c1 fg=white */
+    23,220, 0x1E,0x0E,0x0F,0x07,0x07,0x03,0x03,0x01, /* r3c2 fg=gold  */
+    23,221, 0x00,0x00,0x00,0x00,0x80,0x80,0x80,0xC0, /* r3c3 fg=gold  */
+    23,222, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, /* r3c4 fg=blue  */
+    23,223, 0x1E,0x1C,0x3C,0x3C,0x38,0x78,0x70,0x70, /* r3c5 fg=gold  */
+    /* Row 4 */
+    23,224, 0x7C,0x7C,0x7C,0x7C,0x7C,0x7C,0x7C,0x7C, /* r4c0 fg=white */
+    23,225, 0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00, /* r4c1 fg=white */
+    23,226, 0xF0,0xF8,0x7C,0x3E,0x1F,0x0F,0x07,0x03, /* r4c2 fg=white */
+    23,227, 0xC0,0xE0,0xE0,0xE0,0x70,0x70,0x38,0x18, /* r4c3 fg=gold  */
+    23,228, 0x00,0x00,0x01,0x01,0x01,0x03,0x03,0x03, /* r4c4 fg=gold  */
+    23,229, 0xE0,0xE0,0xE0,0xC0,0xC0,0x80,0x80,0x00, /* r4c5 fg=gold  */
+    /* Row 5 */
+    23,230, 0x7C,0x7C,0x7C,0x7C,0x00,0x00,0x00,0x00, /* r5c0 fg=white */
+    23,231, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, /* r5c1 fg=blue  */
+    23,232, 0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00, /* r5c2 fg=white */
+    23,233, 0xF0,0xF8,0x7C,0x3E,0x00,0x00,0x00,0x00, /* r5c3 fg=white */
+    23,234, 0x07,0x07,0x06,0x0E,0x0C,0x0C,0x18,0x18, /* r5c4 fg=gold  */
+    23,235, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, /* r5c5 fg=blue  */
+    /* Row 6 */
+    23,236, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, /* r6c0 fg=blue  */
+    23,237, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, /* r6c1 fg=blue  */
+    23,238, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, /* r6c2 fg=blue  */
+    23,239, 0x03,0x01,0x01,0x00,0x00,0x00,0x00,0x00, /* r6c3 fg=gold  */
+    23,240, 0xB8,0xF0,0xF0,0xE0,0xE0,0x40,0x00,0x00, /* r6c4 fg=gold  */
+    23,241, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, /* r6c5 fg=blue  */
+    /* Row 7 (all blue — empty bottom margin) */
+    23,242, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    23,243, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    23,244, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    23,245, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    23,246, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    23,247, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    /* Solid block — char 248 (avoids collision with r6c2 = char 238) */
+    23,248, 0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+};
+
+/*
+ * print_riscv_banner — draws the RISC-V logo (6×8 cell grid) with text.
+ *
+ * Color map per cell: 0=blue bg (skip fg), 1=white, 2=gold
+ * Gold = index 14 (bright yellow) when ≥16 colours, else index 6 (brown).
+ */
+
+/* fg color per cell [row][col]: 0=bg-only, 1=white, 2=gold */
+static const uint8_t riscv_cell_fg[8][6] = {
+    {1, 1, 2, 2, 2, 2},  /* row 0 */
+    {1, 1, 2, 0, 0, 2},  /* row 1 */
+    {1, 1, 2, 0, 0, 2},  /* row 2 */
+    {1, 1, 2, 2, 0, 2},  /* row 3 */
+    {1, 1, 1, 2, 2, 2},  /* row 4 */
+    {1, 0, 1, 1, 2, 0},  /* row 5 */
+    {0, 0, 0, 2, 2, 0},  /* row 6 */
+    {0, 0, 0, 0, 0, 0},  /* row 7 (empty) */
+};
+
+static void print_riscv_banner(uint8_t num_colours)
+{
+    /* Use bright yellow (14) when ≥16 colours are available */
+    uint8_t gold = (num_colours >= 16) ? 14 : 6;
+
+    /* Set blue background — stays for entire icon */
+    vdu(17); vdu(128 + 1);  /* VDU 17,129 = bg dark blue */
+
+    for (int cr = 0; cr < 8; cr++) {
+        for (int cc = 0; cc < 6; cc++) {
+            uint8_t cell_type = riscv_cell_fg[cr][cc];
+            uint8_t fg;
+            if (cell_type == 1)      fg = 15;   /* white */
+            else if (cell_type == 2) fg = gold; /* gold  */
+            else                     fg = 1;    /* blue (same as bg = invisible) */
+            vdu(17); vdu(fg);
+            vdu((uint8_t)(200 + cr * 6 + cc));
+        }
+        /* Label text on the right — only on first row */
+        if (cr == 0) {
+            vdu(17); vdu(128 + 0); /* bg black */
+            vdu(17); vdu(15);      /* fg white */
+            vdu(' '); vdu(' ');
+            vdu('A'); vdu('g'); vdu('o'); vdu('n'); vdu(' ');
+            vdu('V'); vdu('D'); vdu('P');
+            vdu(17); vdu(128 + 1); /* restore bg blue for next row */
+        } else if (cr == 2) {
+            vdu(17); vdu(128 + 0); /* bg black */
+            vdu(17); vdu(15);      /* fg white */
+            vdu(' '); vdu(' ');
+            vdu('R'); vdu('I'); vdu('S'); vdu('C'); vdu('-');
+            vdu(17); vdu(gold);
+            vdu('V');
+            vdu(17); vdu(128 + 1);
+        }
+        vdu(13); vdu(10); /* CR LF */
+    }
+
+    /* Reset to normal colors */
+    vdu(17); vdu(128 + 0); /* bg black */
+    vdu(17); vdu(15);       /* fg white */
+    vdu(13); vdu(10);       /* blank line */
+}
+
+/* ── Agon Light 2 warrior icon (caracteres 200–238, 10 bytes c/u) ────────── */
 static const uint8_t boot_logo_icon[] = {
     23,200, 7, 15, 31, 31, 31, 31, 31, 63,
     23,201,192,224,240,240,240,240,240,248,
@@ -313,15 +463,15 @@ static void print_banner(int console8, const screen_info_t *si)
 
 /* ── Barra de colores ────────────────────────────────────────────────────── */
 /*
- * Imprime un bloque sólido (char 238) para cada índice de paleta, ciclando
- * el foreground colour con VDU 17,n.  Idéntico al bucle barloop del original.
+ * Imprime un bloque sólido para cada índice de paleta, ciclando el fg colour.
+ * solid_char: 238 para Agon L2/C8 (usan chars 200-238), 248 para RISC-V.
  */
-static void colour_bar(uint8_t num_colours)
+static void colour_bar(uint8_t num_colours, uint8_t solid_char)
 {
     for (uint8_t c = 0; c < num_colours; c++) {
         vdu(17);  /* VDU 17 = colour: selecciona color de foreground */
         vdu(c);
-        vdu(238); /* caracter bloque sólido que programamos */
+        vdu(solid_char);
         if (c == 31) {   /* fin de línea en posición 31 */
             vdu(13); vdu(10);
         }
@@ -376,15 +526,23 @@ int _start(int argc, char **argv, t_mos_api *mos)
 {
     g_mos = mos;
 
-    /* Determinar modo: argumento '8' → Console8 */
+    /* Determinar modo:
+     *   argumento '8' → Console8
+     *   argumento 'r' → RISC-V logo
+     *   (ninguno)     → Agon Light 2 logo
+     */
     int console8 = 0;
-    if (argc > 1 && argv[1][0] == '8') {
-        console8 = 1;
+    int riscv    = 0;
+    if (argc > 1) {
+        if (argv[1][0] == '8') console8 = 1;
+        if (argv[1][0] == 'r' || argv[1][0] == 'R') riscv = 1;
     }
 
     /* ── 1. Programar los caracteres custom en el VDP ─────────────────── */
     if (console8) {
         vdu_block(boot_logo_c8, sizeof(boot_logo_c8));
+    } else if (riscv) {
+        vdu_block(riscv_logo_chars, sizeof(riscv_logo_chars));
     } else {
         vdu_block(boot_logo_icon, sizeof(boot_logo_icon));
     }
@@ -396,11 +554,18 @@ int _start(int argc, char **argv, t_mos_api *mos)
     get_screen_info(&si);
 
     /* ── 3. Imprimir el banner ───────────────────────────────────────── */
-    print_banner(console8, &si);
+    if (riscv) {
+        print_riscv_banner(si.colours);
+    } else {
+        print_banner(console8, &si);
+    }
 
-    /* ── 4. Barra de colores (solo si no es Console8 y no hay argumento) */
-    if (!console8 && argc <= 1) {
-        colour_bar(si.colours);
+    /* ── 4. Barra de colores ────────────────────────────────────────────── */
+    /* RISC-V usa char 248 (solid block); Agon L2 usa char 238. */
+    if (riscv) {
+        colour_bar(si.colours, 248);
+    } else if (!console8 && argc <= 1) {
+        colour_bar(si.colours, 238);
     }
 
     /* ── 5. Restaurar color foreground original y fuente por defecto ── */
