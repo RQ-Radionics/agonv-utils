@@ -554,7 +554,25 @@ static int  _file_used[MAX_FILES];
 
 FILE *fopen(const char *path, const char *mode)
 {
-    uint8_t fh = _mos->fopen(path, mode);
+    /* MOS requires binary flag 'b' in the mode string ("rb", "wb", "r+b"…).
+       Passing "r" or "w" without 'b' causes MOS fopen to return fh=0 (error).
+       Build a normalised mode that always contains 'b'. */
+    char mosmode[4];
+    {
+        int mi = 0;
+        /* First char: r/w/a */
+        mosmode[mi++] = mode[0];
+        /* Check if 'b' or '+' already present */
+        int has_b = 0, has_plus = 0;
+        for (int k = 1; mode[k]; k++) {
+            if (mode[k] == 'b') has_b = 1;
+            if (mode[k] == '+') has_plus = 1;
+        }
+        if (has_plus) mosmode[mi++] = '+';
+        if (!has_b)   mosmode[mi++] = 'b';
+        mosmode[mi] = '\0';
+    }
+    uint8_t fh = _mos->fopen(path, mosmode);
     if (!fh) return NULL;
     for (int i = 0; i < MAX_FILES; i++) {
         if (!_file_used[i]) {
